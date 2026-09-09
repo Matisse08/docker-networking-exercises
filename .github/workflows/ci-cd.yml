@@ -119,20 +119,19 @@ jobs:
           script: |
             set -e
 
-            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
-              -u "${{ secrets.DOCKERHUB_USERNAME }}" \
-              --password-stdin
+            mkdir -p ~/mm/docker-networking-exercises
+            cd ~/mm/docker-networking-exercises
 
             docker pull "${{ env.DOCKER_IMAGE }}:latest"
 
-            docker rm -f myapp 2>/dev/null || true
+            docker rm -f matisse-docker-networking 2>/dev/null || true
 
             docker run -d \
-              --name myapp \
+              --name matisse-docker-networking \
               --restart unless-stopped \
-              -p 8080:8080 \
+              -p 8081:8080 \
               "${{ env.DOCKER_IMAGE }}:latest"
 
             sleep 5
 
-            curl --fail http://localhost:8080/health
+            curl --fail http://localhost:8081/health
