@@ -1,64 +1,118 @@
-# Docker Networking Exercises
+# Docker Networking Exercises - CI/CD
 
-Mini-projet Docker : une application Flask se connecte à MySQL depuis deux conteneurs distincts.
+Application Flask conteneurisée, déployée automatiquement sur une VM Azure avec GitHub Actions.
 
-## Architecture
+## Application
 
-- `flask-web` : application web Flask, publiée sur `http://localhost:5001`
-- `mysql-exonet` : serveur MySQL
-- `exonet` : réseau Docker user-defined bridge partagé par les deux conteneurs
+L’application expose deux endpoints :
 
-L'application Flask joint MySQL avec le hostname Docker `mysql-exonet`.
+- `GET /` : retourne les informations du service.
+- `GET /health` : retourne l’état de santé de l’application.
 
-## Lancement
+L’application écoute sur le port `8080` dans le conteneur.
 
-Créer le réseau :
+## Lancement local
+
+Construire l’image :
 
 ```bash
-docker network create exonet
+docker build -t docker-networking-exercises .
 ```
 
-Démarrer MySQL :
+Démarrer le conteneur :
 
 ```bash
+docker run --rm -p 8080:8080 docker-networking-exercises
+```
+
+Tester :
+
+```bash
+curl http://localhost:8080/health
+```
+
+## Tests
+
+### Tests unitaires
+
+Les tests unitaires utilisent `pytest` :
+
+```bash
+cd app
+pip install -r requirements.txt
+pip install pytest
+pytest
+```
+
+### Tests E2E
+
+Les tests E2E vérifient l’application lancée dans Docker, notamment :
+
+- la disponibilité via `GET /health` ;
+- la réponse de `GET /`.
+
+Ils sont exécutés automatiquement dans GitHub Actions.
+
+## Pipeline CI/CD
+
+Chaque `git push` sur la branche `main` déclenche automatiquement le workflow GitHub Actions :
+
+1. Exécution des tests unitaires.
+2. Exécution des tests E2E.
+3. Build de l’image Docker.
+4. Push de l’image sur Docker Hub :
+   `matisse1/docker-networking-exercises`.
+5. Connexion SSH à la VM Azure.
+6. Pull de l’image Docker Hub.
+7. Redéploiement du conteneur.
+8. Vérification automatique de `GET /health`.
+
+Le build, le push et le déploiement ne sont exécutés que si les tests unitaires et E2E réussissent.
+
+## Déploiement Azure
+
+La VM Azure utilise un port distinct pour éviter tout conflit sur une VM partagée :
+
+```text
+Port VM : 8081
+Port conteneur : 8080
+Conteneur : matisse-docker-networking
+```
+
+Le déploiement est idempotent. À chaque exécution, GitHub Actions supprime uniquement l’ancien conteneur `matisse-docker-networking`, puis démarre une nouvelle version avec le même nom :
+
+```bash
+docker rm -f matisse-docker-networking || true
+
 docker run -d \
-  --name mysql-exonet \
-  --platform linux/amd64 \
-  --network exonet \
-  -e MYSQL_ROOT_PASSWORD=motdepasse \
-  -e MYSQL_DATABASE=demo_db \
-  mysql:5.7
+  --name matisse-docker-networking \
+  --restart unless-stopped \
+  -p 8081:8080 \
+  matisse1/docker-networking-exercises:latest
 ```
 
-Construire Flask :
+La pipeline vérifie automatiquement l’application sur la VM avec :
 
 ```bash
-cd flask-web
-docker build -t flask-mysql-demo .
+curl --fail http://localhost:8081/health
 ```
 
-Démarrer Flask :
+URL publique prévue :
 
-```bash
-docker run -d \
-  --name flask-web \
-  --network exonet \
-  -p 5001:5001 \
-  -e DB_HOST=mysql-exonet \
-  -e DB_USER=root \
-  -e DB_PASSWORD=motdepasse \
-  -e DB_NAME=demo_db \
-  flask-mysql-demo
+```text
+http://20.56.74.49:8081/health
 ```
 
-## Vérification
+> L’accès externe au port `8081` dépend de la règle réseau Azure de la VM partagée. Le déploiement et le healthcheck local sur la VM sont validés par GitHub Actions.
 
-Ouvrir `http://localhost:5001`. La page doit indiquer que la connexion MySQL a réussi.
+## Secrets GitHub utilisés
 
-## Arrêt
+Les informations sensibles ne sont pas stockées dans le dépôt. Le workflow utilise les GitHub Secrets suivants :
 
-```bash
-docker stop flask-web mysql-exonet
-docker rm flask-web mysql-exonet
-docker network rm exonet
+```text
+DOCKERHUB_USERNAME
+DOCKERHUB_TOKEN
+VM_HOST
+VM_USER
+VM_SSH_PRIVATE_KEY
 ```
